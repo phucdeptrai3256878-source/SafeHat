@@ -35,7 +35,6 @@
         let vertexMarkers = [];
         let workerMarkers = {};
 
-        // Geofence chuẩn khu vực ĐH Bách Khoa TP.HCM (Lưu toàn cục để đồng bộ giữa Quản lý và Y tế)
         let siteGeofence = [
             [10.7738, 106.6575],
             [10.7752, 106.6582],
@@ -84,7 +83,11 @@
                                         </select>
                                     </div>
                                 </div>
-                                <div id="map" class="h-[480px] w-full rounded-lg"></div>
+                                <div id="map" class="h-[450px] w-full rounded-lg"></div>
+                                <div class="mt-3 flex gap-2">
+                                    <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded">Đặt lại mặc định</button>
+                                    <span class="text-xs text-slate-400 self-center" id="geofence-status">Đang có ${siteGeofence.length} điểm.</span>
+                                </div>
                             </div>
                             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
                                 <h2 class="font-semibold text-lg text-amber-400 mb-3">🚨 Danh Sách Cảnh Báo</h2>
@@ -162,6 +165,16 @@
             }
         }
 
+        function resetGeofence() {
+            siteGeofence = [
+                [10.7738, 106.6575],
+                [10.7752, 106.6582],
+                [10.7745, 106.6605],
+                [10.7728, 106.6595]
+            ];
+            drawGeofence(true);
+        }
+
         function drawGeofence(isEditable) {
             if (!map) return;
             if (polygonLayer) map.removeLayer(polygonLayer);
@@ -186,6 +199,9 @@
                     });
                     vertexMarkers.push(marker);
                 });
+
+                const status = document.getElementById('geofence-status');
+                if (status) status.innerText = `Đang có ${siteGeofence.length} điểm.`;
             }
         }
 
@@ -197,9 +213,9 @@
 
             workers.forEach((w, index) => {
                 let r = readings[w.id];
-                // Nếu chưa có tọa độ từ ESP32 thực tế, tạo vị trí động quanh Bách Khoa để công nhân chuyển động test
+                // Đã fix lại kinh độ thành 106.6585 để trả về VN thay vì Nigeria
                 let lat = r ? r.lat : (10.7738 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
-                let lon = r ? r.lon : (10.6585 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
+                let lon = r ? r.lon : (106.6585 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
                 let worn = r ? r.worn : true;
                 let fallen = r ? r.fallen : false;
                 let battery = r ? r.battery : 100;
