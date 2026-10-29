@@ -216,7 +216,320 @@
                 const marker = workerMarkers[id];
                 map.flyTo(marker.getLatLng(), 19, { duration: 1.2 });
                 marker.openPopup();
+            }<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeHat - Hệ thống Giám sát An toàn Công trường</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>.dark { color-scheme: dark; }</style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+    <div class="p-6 max-w-7xl mx-auto">
+        <header class="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-amber-500 p-2 rounded-xl text-slate-950 font-black text-xl">👷‍♂️ SafeHat</div>
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight">Hệ Thống Giám Sát An Toàn Lao Động</h1>
+                    <p class="text-sm text-slate-400">Kết nối phần cứng ESP32 thực tế qua Cloud</p>
+                </div>
+            </div>
+            <div class="flex space-x-2">
+                <button onclick="switchRole('worker')" id="btn-worker" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300">Công Nhân</button>
+                <button onclick="switchRole('manager')" id="btn-manager" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold">Quản Lý</button>
+                <button onclick="switchRole('medical')" id="btn-medical" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300">Phòng Y Tế</button>
+            </div>
+        </header>
+        <main id="main-content"></main>
+    </div>
+
+    <script>
+        let currentRole = 'manager';
+        let map = null;
+        let polygonLayer = null;
+        let vertexMarkers = [];
+        let workerMarkers = {};
+        let siteGeofence = [
+            [10.7738, 106.6575],
+            [10.7752, 106.6582],
+            [10.7745, 106.6605],
+            [10.7728, 106.6595]
+        ];
+
+        function switchRole(role) {
+            currentRole = role;
+            ['worker', 'manager', 'medical'].forEach(r => {
+                const btn = document.getElementById('btn-' + r);
+                if(btn) btn.className = r === role ? "px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold" : "px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300";
+            });
+            renderView();
+        }
+
+        async function renderView() {
+            const container = document.getElementById('main-content');
+            if (!container) return;
+
+            try {
+                const res = await fetch('/api/dashboard-state');
+                const data = await res.json();
+                if (data && data.geofence) siteGeofence = data.geofence;
+                const workers = (data && data.workers) ? data.workers : [];
+
+                if (currentRole === 'manager') {
+                    container.innerHTML = `
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Đang đội mũ & Trong vùng</p><p class="text-3xl font-bold text-emerald-400" id="stat-safe">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Công nhân tháo mũ</p><p class="text-3xl font-bold text-amber-500" id="stat-warning">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Ca té ngã khẩn cấp</p><p class="text-3xl font-bold text-red-500" id="stat-fall">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Tổng cảnh báo</p><p class="text-3xl font-bold text-rose-400" id="stat-alerts">0</p></div>
+                        </div>
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h2 class="font-semibold text-lg text-amber-400">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs text-slate-400">📍 Locate:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold">
+                                            <option value="">-- Chọn công nhân --</option>
+                                            ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="map" class="h-[450px] w-full rounded-lg"></div>
+                                <div class="mt-3 flex gap-2">
+                                    <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded">Đặt lại mặc định</button>
+                                    <span class="text-xs text-slate-400 self-center" id="geofence-status">Đang có ${siteGeofence.length} điểm.</span>
+                                </div>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
+                                <h2 class="font-semibold text-lg text-amber-400 mb-3">🚨 Danh Sách Cảnh Báo</h2>
+                                <div class="space-y-3 overflow-y-auto max-h-[400px]" id="alerts-list"><p class="text-sm text-slate-500">Trống</p></div>
+                            </div>
+                        </div>`;
+                    setTimeout(() => initMap(data, true), 50);
+
+                } else if (currentRole === 'medical') {
+                    container.innerHTML = `
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h2 class="font-semibold text-lg text-red-500">🏥 Bản Đồ Y Tế Định Vị Khẩn Cấp</h2>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs text-slate-400">📍 Định vị:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-red-400 rounded p-1.5 font-bold">
+                                            <option value="">-- Chọn công nhân --</option>
+                                            ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="map" class="h-[450px] w-full rounded-lg"></div>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
+                                <h2 class="text-lg font-bold text-red-500 mb-2">🚨 Ca Té Ngã Hiện Tại</h2>
+                                <div class="space-y-3 overflow-y-auto max-h-[180px] mb-4 border-b border-slate-800 pb-3" id="medical-alerts"><p class="text-slate-400 text-xs">Đang quét...</p></div>
+
+                                <h2 class="text-base font-bold text-slate-300 mb-2">📜 Lịch Sử Cảnh Báo Y Tế</h2>
+                                <div class="space-y-2 overflow-y-auto max-h-[180px]" id="medical-history"><p class="text-slate-500 text-xs">Chưa có lịch sử.</p></div>
+                            </div>
+                        </div>`;
+                    setTimeout(() => { initMap(data, false); renderMedicalAlerts(data); }, 50);
+
+                } else {
+                    container.innerHTML = `
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-xl mx-auto">
+                            <h2 class="text-xl font-bold text-amber-400 mb-4">👷‍♂️ Cổng Thông Tin Công Nhân</h2>
+                            <div class="space-y-4">
+                                <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
+                                <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white">
+                                    ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
+                                </select>
+                                <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2 rounded-lg hover:bg-amber-400">Xem Trạng Thái</button>
+                                <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500">Chưa chọn.</p></div>
+                            </div>
+                        </div>`;
+                }
+            } catch (err) {
+                console.error(err);
+                container.innerHTML = `<div class="p-6 text-red-400">Lỗi tải giao diện! Vui lòng F5 lại trang.</div>`;
             }
+        }
+
+        function initMap(data, isEditable) {
+            if (map) { map.remove(); map = null; }
+            const mapEl = document.getElementById('map');
+            if (!mapEl) return;
+
+            map = L.map('map').setView([10.7738, 106.6585], 17);
+            L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google Maps'
+            }).addTo(map);
+
+            drawGeofence(isEditable);
+            if (isEditable) {
+                map.on('click', e => { siteGeofence.push([e.latlng.lat, e.latlng.lng]); drawGeofence(true); });
+            }
+            if (data && data.readings && data.workers) {
+                updateWorkers(data.readings, data.workers);
+                if (isEditable) updateAlerts(data.alerts, data.workers);
+            }
+        }
+
+        function drawGeofence(isEditable) {
+            if (!map) return;
+            if (polygonLayer) map.removeLayer(polygonLayer);
+            vertexMarkers.forEach(m => map.removeLayer(m));
+            vertexMarkers = [];
+
+            polygonLayer = L.polygon(siteGeofence, { color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.25, weight: 2 }).addTo(map);
+
+            if (isEditable) {
+                siteGeofence.forEach((coord, idx) => {
+                    const marker = L.marker(coord, {
+                        icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white;"></div>`, className: '' }),
+                        draggable: true
+                    }).addTo(map);
+
+                    marker.on('drag', e => {
+                        siteGeofence[idx] = [e.target.getLatLng().lat, e.target.getLatLng().lng];
+                        polygonLayer.setLatLngs(siteGeofence);
+                    });
+                    marker.on('dblclick', () => {
+                        if (siteGeofence.length > 3) { siteGeofence.splice(idx, 1); drawGeofence(true); }
+                    });
+                    vertexMarkers.push(marker);
+                });
+                const status = document.getElementById('geofence-status');
+                if (status) status.innerText = `Đang có ${siteGeofence.length} điểm.`;
+            }
+        }
+
+        function resetGeofence() {
+            siteGeofence = [[10.7738, 106.6575], [10.7752, 106.6582], [10.7745, 106.6605], [10.7728, 106.6595]];
+            drawGeofence(true);
+        }
+
+        function updateWorkers(readings, workers) {
+            if (!map) return;
+            Object.values(workerMarkers).forEach(m => map.removeLayer(m));
+            workerMarkers = {};
+            let safe = 0, warning = 0, fall = 0;
+
+            workers.forEach(w => {
+                const r = readings[w.id] || { lat: 10.7738, lon: 106.6585, worn: true, fallen: false };
+                let color = '#22c55e';
+                if (r.fallen) { color = '#ef4444'; fall++; }
+                else if (!r.worn) { color = '#f97316'; warning++; }
+                else { safe++; }
+
+                const marker = L.marker([r.lat, r.lon], {
+                    icon: L.divIcon({ html: `<div style="background:${color}; width:16px; height:16px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' })
+                }).addTo(map).bindPopup(`<b>${w.name}</b><br>ID: ${w.id}<br>Trạng thái: ${r.worn ? 'Đang đội mũ' : 'Đã tháo mũ'}<br>Pin: ${r.battery || 100}%`);
+                workerMarkers[w.id] = marker;
+            });
+
+            if(document.getElementById('stat-safe')) document.getElementById('stat-safe').innerText = safe;
+            if(document.getElementById('stat-warning')) document.getElementById('stat-warning').innerText = warning;
+            if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fall;
+        }
+
+        function locateWorker() {
+            const select = document.getElementById('locate-worker-select');
+            if (!select || !map) return;
+            const id = select.value;
+            if (id && workerMarkers[id]) {
+                const marker = workerMarkers[id];
+                map.flyTo(marker.getLatLng(), 19, { duration: 1.2 });
+                marker.openPopup();
+            }
+        }
+
+        function updateAlerts(alerts, workers) {
+            const list = document.getElementById('alerts-list');
+            if(!list) return;
+            if(!alerts || alerts.length === 0) { list.innerHTML = `<p class="text-sm text-slate-500">Chưa có cảnh báo.</p>`; return; }
+            list.innerHTML = alerts.map(a => {
+                const w = workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
+                return `<div class="p-3 bg-slate-950 rounded-lg border border-slate-800"><span class="px-2 py-0.5 rounded text-xs font-bold ${a.type === 'TÉ_NGÃ' ? 'bg-red-500 text-white' : 'bg-amber-500 text-slate-950'}">${a.type}</span><p class="text-sm font-semibold mt-1">${w.name}</p></div>`;
+            }).join('');
+        }
+
+        function renderMedicalAlerts(data) {
+            const med = document.getElementById('medical-alerts');
+            const history = document.getElementById('medical-history');
+            if (!med) return;
+
+            const falls = data.alerts ? data.alerts.filter(a => a.type === 'TÉ_NGÃ') : [];
+            if (falls.length === 0) {
+                med.innerHTML = `<p class="text-slate-400 text-xs">Không có ca té ngã hiện tại.</p>`;
+            } else {
+                med.innerHTML = falls.map(a => {
+                    const w = data.workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
+                    return `<div class="p-3 bg-red-950/40 border border-red-600 rounded-lg"><p class="text-white font-bold text-sm">${w.name}</p><a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank" class="mt-2 block text-center py-1 bg-red-600 text-white rounded text-xs font-bold">Mở Maps Cứu Hộ</a></div>`;
+                }).join('');
+            }
+
+            if (history) {
+                if (!data.alerts || data.alerts.length === 0) {
+                    history.innerHTML = `<p class="text-slate-500 text-xs">Chưa có lịch sử cảnh báo.</p>`;
+                } else {
+                    history.innerHTML = data.alerts.map(a => {
+                        const w = data.workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
+                        const timeStr = new Date(a.timestamp).toLocaleTimeString();
+                        return `
+                            <div class="p-2 bg-slate-950 rounded border border-slate-800 text-xs mb-2">
+                                <div class="flex justify-between items-center">
+                                    <span class="font-bold text-slate-300">${w.name}</span>
+                                    <span class="text-slate-500">${timeStr}</span>
+                                </div>
+                                <span class="text-red-400 font-semibold">${a.type}</span>
+                            </div>`;
+                    }).join('');
+                }
+            }
+        }
+
+        async function loadWorkerStats() {
+            const select = document.getElementById('select-worker-id');
+            if (!select) return;
+            const id = select.value;
+            const res = await fetch('/api/dashboard-state');
+            const data = await res.json();
+            const w = data.workers.find(item => item.id === id);
+            const r = data.readings[id] || { worn: true, battery: 100, fallen: false };
+            const alertCount = data.alerts ? data.alerts.filter(a => a.worker_id === id).length : 0;
+
+            document.getElementById('worker-result').innerHTML = `
+                <div class="space-y-2">
+                    <p class="font-bold text-amber-400 text-lg">${w.name} - ${w.trade}</p>
+                    <p class="text-sm">Trạng thái mũ: <span class="${r.worn ? 'text-emerald-400 font-bold' : 'text-amber-500 font-bold'}">${r.worn ? 'Đang đội' : 'Đã tháo mũ'}</span></p>
+                    <p class="text-sm">Mức pin thiết bị: <b>${r.battery}%</b></p>
+                    <p class="text-sm">Trạng thái té ngã: <span class="${r.fallen ? 'text-red-500 font-bold' : 'text-emerald-400'}">${r.fallen ? 'ĐANG BỊ TÉ NGÃ!' : 'An toàn'}</span></p>
+                    <div class="mt-3 pt-3 border-t border-slate-800 flex justify-between items-center">
+                        <span class="text-sm text-slate-400">Số lần ghi nhận cảnh báo:</span>
+                        <span class="px-2.5 py-1 bg-amber-500/20 text-amber-400 font-black rounded-lg text-sm">${alertCount} lần</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/dashboard-state');
+                const data = await res.json();
+                if (data && map) {
+                    if (currentRole === 'manager') { updateWorkers(data.readings, data.workers); updateAlerts(data.alerts, data.workers); }
+                    else if (currentRole === 'medical') { updateWorkers(data.readings, data.workers); renderMedicalAlerts(data); }
+                }
+            } catch (e) {}
+        }, 3000);
+
+        renderView();
+    </script>
+</body>
+</html>
         }
 
         function updateAlerts(alerts, workers) {
