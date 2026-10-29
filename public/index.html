@@ -67,7 +67,16 @@
                         </div>
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                <h2 class="font-semibold text-lg text-amber-400 mb-2">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
+                                <div class="flex justify-between items-center mb-3">
+                                    <h2 class="font-semibold text-lg text-amber-400">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs text-slate-400">📍 Locate:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold">
+                                            <option value="">-- Chọn công nhân --</option>
+                                            ${data.workers.map(w => `<option value="${w.id}">${w.id} -${w.name}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
                                 <div id="map" class="h-[450px] w-full rounded-lg"></div>
                                 <div class="mt-3 flex gap-2">
                                     <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded">Đặt lại mặc định</button>
@@ -80,35 +89,49 @@
                             </div>
                         </div>`;
                     setTimeout(() => initMap(data, true), 50);
+
                 } else if (currentRole === 'medical') {
                     container.innerHTML = `
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                <h2 class="font-semibold text-lg text-red-500 mb-2">🏥 Bản Đồ Y Tế (Chỉ Xem)</h2>
+                                <div class="flex justify-between items-center mb-3">
+                                    <h2 class="font-semibold text-lg text-red-500">🏥 Bản Đồ Y Tế Định Vị Khẩn Cấp</h2>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs text-slate-400">📍 Định vị:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-red-400 rounded p-1.5 font-bold">
+                                            <option value="">-- Chọn công nhân --</option>
+                                            ${data.workers.map(w => `<option value="${w.id}">${w.id} -${w.name}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
                                 <div id="map" class="h-[450px] w-full rounded-lg"></div>
                             </div>
                             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
-                                <h2 class="text-xl font-bold text-red-500 mb-4">🚨 Ca Té Ngã Khẩn Cấp</h2>
-                                <div class="space-y-4 overflow-y-auto max-h-[400px]" id="medical-alerts"><p class="text-slate-400">Đang quét...</p></div>
+                                <h2 class="text-lg font-bold text-red-500 mb-2">🚨 Ca Té Ngã Hiện Tại</h2>
+                                <div class="space-y-3 overflow-y-auto max-h-[180px] mb-4 border-b border-slate-800 pb-3" id="medical-alerts"><p class="text-slate-400 text-xs">Đang quét...</p></div>
+
+                                <h2 class="text-base font-bold text-slate-300 mb-2">📜 Lịch Sử Cảnh Báo Y Tế</h2>
+                                <div class="space-y-2 overflow-y-auto max-h-[180px]" id="medical-history"><p class="text-slate-500 text-xs">Chưa có lịch sử.</p></div>
                             </div>
                         </div>`;
                     setTimeout(() => { initMap(data, false); renderMedicalAlerts(data); }, 50);
+
                 } else {
                     container.innerHTML = `
                         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-xl mx-auto">
                             <h2 class="text-xl font-bold text-amber-400 mb-4">👷‍♂️ Cổng Thông Tin Công Nhân</h2>
                             <div class="space-y-4">
-                                <label class="block text-sm text-slate-400">Chọn ID Mũ:</label>
+                                <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
                                 <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white">
                                     ${data.workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
                                 </select>
-                                <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2 rounded-lg">Xem Trạng Thái</button>
+                                <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2 rounded-lg hover:bg-amber-400">Xem Trạng Thái</button>
                                 <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500">Chưa chọn.</p></div>
                             </div>
                         </div>`;
                 }
             } catch (err) {
-                container.innerHTML = `<div class="p-6 text-red-400">Lỗi tải dữ liệu server!</div>`;
+                container.innerHTML = `<div class="p-6 text-red-400">Lỗi kết nối Server!</div>`;
             }
         }
 
@@ -174,8 +197,8 @@
                 else { safe++; }
 
                 const marker = L.marker([r.lat, r.lon], {
-                    icon: L.divIcon({ html: `<div style="background:${color}; width:16px; height:16px; border-radius:50%; border:2px solid white;"></div>`, className: '' })
-                }).addTo(map).bindPopup(`<b>${w.name}</b><br>Trạng thái: ${r.worn ? 'Đội mũ' : 'Tháo mũ'}`);
+                    icon: L.divIcon({ html: `<div style="background:${color}; width:16px; height:16px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' })
+                }).addTo(map).bindPopup(`<b>${w.name}</b><br>ID: ${w.id}<br>Trạng thái: ${r.worn ? 'Đang đội mũ' : 'Đã tháo mũ'}<br>Pin: ${r.battery || 100}%`);
                 workerMarkers[w.id] = marker;
             });
 
@@ -184,46 +207,21 @@
             if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fall;
         }
 
+        // Định vị công nhân khi bấm chọn tên
+        function locateWorker() {
+            const select = document.getElementById('locate-worker-select');
+            if (!select) return;
+            const id = select.value;
+            if (id && workerMarkers[id]) {
+                const marker = workerMarkers[id];
+                map.flyTo(marker.getLatLng(), 19, { duration: 1.2 });
+                marker.openPopup();
+            }
+        }
+
         function updateAlerts(alerts, workers) {
             const list = document.getElementById('alerts-list');
             if(!list) return;
-            if(!alerts || alerts.length === 0) { list.innerHTML = `<p class="text-sm text-slate-500">Trống</p>`; return; }
+            if(!alerts || alerts.length === 0) { list.innerHTML = `<p class="text-sm text-slate-500">Chưa có cảnh báo.</p>`; return; }
             list.innerHTML = alerts.map(a => {
-                const w = workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
-                return `<div class="p-3 bg-slate-950 rounded-lg border border-slate-800"><span class="px-2 py-0.5 rounded text-xs font-bold ${a.type === 'TÉ_NGÃ' ? 'bg-red-500 text-white' : 'bg-amber-500 text-slate-950'}">${a.type}</span><p class="text-sm font-semibold mt-1">${w.name}</p></div>`;
-            }).join('');
-        }
-
-        function renderMedicalAlerts(data) {
-            const med = document.getElementById('medical-alerts');
-            if(!med) return;
-            const falls = data.alerts.filter(a => a.type === 'TÉ_NGÃ');
-            if(falls.length === 0) { med.innerHTML = `<p class="text-slate-400 text-sm">Không có ca té ngã.</p>`; return; }
-            med.innerHTML = falls.map(a => {
-                const w = data.workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
-                return `<div class="p-4 bg-red-950/40 border border-red-600 rounded-lg"><p class="text-white font-bold">${w.name}</p><a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank" class="mt-2 block text-center py-1.5 bg-red-600 text-white rounded text-xs font-bold">Mở Google Maps Cứu Hộ</a></div>`;
-            }).join('');
-        }
-
-        async function loadWorkerStats() {
-            const id = document.getElementById('select-worker-id').value;
-            const res = await fetch('/api/dashboard-state');
-            const data = await res.json();
-            const w = data.workers.find(item => item.id === id);
-            const r = data.readings[id] || { worn: true, battery: 100, fallen: false };
-            document.getElementById('worker-result').innerHTML = `<p class="font-bold text-amber-400">${w.name}</p><p class="text-sm">Trạng thái: ${r.worn ? 'Đang đội' : 'Đã tháo'}</p>`;
-        }
-
-        setInterval(async () => {
-            const res = await fetch('/api/dashboard-state');
-            const data = await res.json();
-            if (data && map) {
-                if (currentRole === 'manager') { updateWorkers(data.readings, data.workers); updateAlerts(data.alerts, data.workers); }
-                else if (currentRole === 'medical') { updateWorkers(data.readings, data.workers); renderMedicalAlerts(data); }
-            }
-        }, 3000);
-
-        renderView();
-    </script>
-</body>
-</html>
+                const w = workers.find(item => item.id === a.worker_id) || { name
