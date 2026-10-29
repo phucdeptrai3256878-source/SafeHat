@@ -12,9 +12,7 @@
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
-    <!-- App Container -->
     <div id="app" class="p-6 max-w-7xl mx-auto">
-        <!-- Header -->
         <header class="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
             <div class="flex items-center space-x-3">
                 <div class="bg-amber-500 p-2 rounded-xl text-slate-950 font-black text-xl">👷‍♂️ SafeHat</div>
@@ -30,16 +28,14 @@
             </div>
         </header>
 
-        <!-- Main Content Area -->
-        <main id="main-content">
-            <!-- Nội dung sẽ được render động bằng JS tùy theo vai trò -->
-        </main>
+        <main id="main-content"></main>
     </div>
 
     <script>
         let currentRole = 'manager';
         let map = null;
         let polygonLayer = null;
+        let vertexMarkers = [];
         let workerMarkers = {};
         let siteGeofence = [
             [10.7760, 106.7000],
@@ -102,19 +98,19 @@
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
                             <div class="flex justify-between items-center mb-4">
-                                <h2 class="font-semibold text-lg text-amber-400">🗺️ Sơ Đồ Công Trường & Geofence Live</h2>
-                                <span class="text-xs text-slate-400">Click trên bản đồ để thêm điểm Geofence mới</span>
+                                <h2 class="font-semibold text-lg text-amber-400">🗺️ Sơ Đồ Công Trường & Kéo Thả Geofence</h2>
+                                <span class="text-xs text-slate-400">Kéo các chấm đỏ để dịch chuyển vùng hoặc click bản đồ thêm điểm</span>
                             </div>
-                            <div id="map" class="h-[450px] w-full rounded-lg z-0"></div>
+                            <div id="map" class="h-[480px] w-full rounded-lg z-0"></div>
                             <div class="mt-3 flex gap-2">
                                 <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded">Đặt lại Geofence mặc định</button>
-                                <span class="text-xs text-slate-400 self-center" id="geofence-status">Vùng hiện tại có ${siteGeofence.length} điểm tọa độ.</span>
+                                <span class="text-xs text-slate-400 self-center" id="geofence-status">Vùng hiện tại có ${siteGeofence.length} điểm.</span>
                             </div>
                         </div>
 
                         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
                             <h2 class="font-semibold text-lg text-amber-400 mb-3">🚨 Danh Sách Cảnh Báo</h2>
-                            <div class="space-y-3 overflow-y-auto max-h-[440px]" id="alerts-list">
+                            <div class="space-y-3 overflow-y-auto max-h-[460px]" id="alerts-list">
                                 <p class="text-sm text-slate-500">Chưa có cảnh báo nào.</p>
                             </div>
                         </div>
@@ -125,9 +121,7 @@
                 container.innerHTML = `
                     <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
                         <h2 class="text-xl font-bold text-red-500 mb-4">🏥 Phòng Y Tế - Theo Dõi Khẩn Cấp Té Ngã</h2>
-                        <div class="space-y-4" id="medical-alerts">
-                            <p class="text-slate-400">Đang quét tín hiệu khẩn cấp...</p>
-                        </div>
+                        <div class="space-y-4" id="medical-alerts"><p class="text-slate-400">Đang quét tín hiệu...</p></div>
                     </div>
                 `;
                 renderMedicalAlerts(data);
@@ -135,15 +129,13 @@
                 container.innerHTML = `
                     <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-xl mx-auto">
                         <h2 class="text-xl font-bold text-amber-400 mb-4">👷‍♂️ Cổng Thông Tin Công Nhân</h2>
-                        <div class="space-y-4" id="worker-panel">
-                            <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân của bạn:</label>
+                        <div class="space-y-4">
+                            <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
                             <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white">
                                 ${data.workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
                             </select>
                             <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2 rounded-lg hover:bg-amber-400">Xem Trạng Thái Mũ</button>
-                            <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800">
-                                <p class="text-slate-500">Vui lòng chọn ID và bấm xem.</p>
-                            </div>
+                            <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500">Vui lòng chọn ID.</p></div>
                         </div>
                     </div>
                 `;
@@ -151,20 +143,33 @@
         }
 
         function initMap(data) {
-            if (map) {
-                map.remove();
-                map = null;
-            }
+            if (map) { map.remove(); map = null; }
 
             map = L.map('map').setView([10.7769, 106.7009], 16);
 
-            // Dùng OpenStreetMap tiêu chuẩn không cần API Key
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '© OpenStreetMap'
             }).addTo(map);
 
-            // Vẽ Geofence polygon
+            drawGeofencePolygon();
+
+            // Click vào bản đồ để thêm đỉnh mới cho Geofence
+            map.on('click', function(e) {
+                siteGeofence.push([e.latlng.lat, e.latlng.lng]);
+                drawGeofencePolygon();
+            });
+
+            updateWorkersOnMap(data.readings, data.workers);
+            updateAlertsList(data.alerts, data.workers);
+        }
+
+        function drawGeofencePolygon() {
+            if (polygonLayer) map.removeLayer(polygonLayer);
+            vertexMarkers.forEach(m => map.removeLayer(m));
+            vertexMarkers = [];
+
+            // Vẽ vùng đa giác cam
             polygonLayer = L.polygon(siteGeofence, {
                 color: '#f59e0b',
                 fillColor: '#f59e0b',
@@ -172,22 +177,36 @@
                 weight: 2
             }).addTo(map);
 
-            // Cho phép click vào bản đồ để chấm thêm điểm Geofence mới
-            map.on('click', function(e) {
-                const { lat, lng } = e.latlng;
-                siteGeofence.push([lat, lng]);
-                updateGeofencePolygon();
+            // Tạo các chấm đỏ (markers) có thể KÉO THẢ (draggable) tại mỗi đỉnh của đa giác
+            siteGeofence.forEach((coord, index) => {
+                const redDotIcon = L.divIcon({
+                    html: `<div style="background-color: #ef4444; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.6); cursor: grab;"></div>`,
+                    className: 'vertex-pin'
+                });
+
+                const marker = L.marker(coord, { icon: redDotIcon, draggable: true }).addTo(map);
+
+                // Khi kéo thả chấm đỏ, cập nhật lại tọa độ đỉnh của đa giác
+                marker.on('drag', function(e) {
+                    const latlng = e.target.getLatLng();
+                    siteGeofence[index] = [latlng.lat, latlng.lng];
+                    polygonLayer.setLatLngs(siteGeofence);
+                });
+
+                // Double click vào chấm đỏ để xóa đỉnh đó đi
+                marker.on('dblclick', function() {
+                    if (siteGeofence.length > 3) {
+                        siteGeofence.splice(index, 1);
+                        drawGeofencePolygon();
+                    } else {
+                        alert("Vùng an toàn cần ít nhất 3 điểm!");
+                    }
+                });
+
+                vertexMarkers.push(marker);
             });
 
-            updateWorkersOnMap(data.readings, data.workers);
-            updateAlertsList(data.alerts, data.workers);
-        }
-
-        function updateGeofencePolygon() {
-            if (polygonLayer) {
-                polygonLayer.setLatLngs(siteGeofence);
-            }
-            document.getElementById('geofence-status').innerText = `Vùng hiện tại có ${siteGeofence.length} điểm tọa độ. (Đã cập nhật thay đổi)`;
+            document.getElementById('geofence-status').innerText = `Vùng hiện tại có ${siteGeofence.length} điểm. (Kéo thả chấm đỏ để dịch chuyển)`;
         }
 
         function resetGeofence() {
@@ -197,88 +216,79 @@
                 [10.7800, 106.7025],
                 [10.7761, 106.7023]
             ];
-            updateGeofencePolygon();
+            drawGeofencePolygon();
         }
 
         function updateWorkersOnMap(readings, workers) {
             if (!map) return;
-            // Xóa marker cũ
             Object.values(workerMarkers).forEach(m => map.removeLayer(m));
             workerMarkers = {};
 
-            let safeCount = 0;
-            let warningCount = 0;
-            let fallCount = 0;
+            let safe = 0, warning = 0, fall = 0;
 
             workers.forEach(w => {
-                const reading = readings[w.id];
-                const lat = reading ? reading.lat : 10.7769 + (Math.random() - 0.5) * 0.002;
-                const lon = reading ? reading.lon : 106.7009 + (Math.random() - 0.5) * 0.002;
-                const worn = reading ? reading.worn : true;
-                const fallen = reading ? reading.fallen : false;
+                const r = readings[w.id];
+                const lat = r ? r.lat : 10.7769 + (Math.random() - 0.5) * 0.002;
+                const lon = r ? r.lon : 106.7009 + (Math.random() - 0.5) * 0.002;
+                const worn = r ? r.worn : true;
+                const fallen = r ? r.fallen : false;
 
-                let color = '#22c55e'; // Xanh lá
-                if (fallen) { color = '#ef4444'; fallCount++; }
-                else if (!worn) { color = '#f97316'; warningCount++; }
-                else { safeCount++; }
+                let color = '#22c55e';
+                if (fallen) { color = '#ef4444'; fall++; }
+                else if (!worn) { color = '#f97316'; warning++; }
+                else { safe++; }
 
-                if (worn && !fallen) safeCount++;
+                const pinHtml = `<div style="background-color: ${color}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.5);"></div>`;
+                const icon = L.divIcon({ html: pinHtml, className: 'worker-pin' });
 
-                const markerHtml = `<div style="background-color: ${color}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.5);"></div>`;
-                const customIcon = L.divIcon({ html: markerHtml, className: 'custom-pin' });
-
-                const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map)
-                    .bindPopup(`<b>${w.name}</b> (${w.trade})<br>Mũ: ${worn ? 'Đang đội' : 'Đã tháo'}<br>Pin: ${reading?.battery || 100}%`);
-
+                const marker = L.marker([lat, lon], { icon }).addTo(map)
+                    .bindPopup(`<b>${w.name}</b><br>Mũ: ${worn ? 'Đội' : 'Tháo'}<br>Pin: ${r?.battery || 100}%`);
                 workerMarkers[w.id] = marker;
             });
 
-            if(document.getElementById('stat-safe')) document.getElementById('stat-safe').innerText = safeCount;
-            if(document.getElementById('stat-warning')) document.getElementById('stat-warning').innerText = warningCount;
-            if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fallCount;
+            if(document.getElementById('stat-safe')) document.getElementById('stat-safe').innerText = safe;
+            if(document.getElementById('stat-warning')) document.getElementById('stat-warning').innerText = warning;
+            if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fall;
         }
 
         function updateAlertsList(alerts, workers) {
-            const listEl = document.getElementById('alerts-list');
-            if(!listEl) return;
+            const list = document.getElementById('alerts-list');
+            if(!list) return;
             if(!alerts || alerts.length === 0) {
-                listEl.innerHTML = `<p class="text-sm text-slate-500">Không có cảnh báo nào.</p>`;
+                list.innerHTML = `<p class="text-sm text-slate-500">Không có cảnh báo nào.</p>`;
                 if(document.getElementById('stat-alerts')) document.getElementById('stat-alerts').innerText = 0;
                 return;
             }
-
             if(document.getElementById('stat-alerts')) document.getElementById('stat-alerts').innerText = alerts.filter(a => !a.resolved).length;
 
-            listEl.innerHTML = alerts.map(a => {
-                const worker = workers.find(w => w.id === a.worker_id) || { name: 'Nhân viên #' + a.worker_id };
+            list.innerHTML = alerts.map(a => {
+                const w = workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
                 return `
-                    <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 flex justify-between items-center">
-                        <div>
-                            <span class="px-2 py-0.5 rounded text-xs font-bold ${a.type === 'TÉ_NGÃ' ? 'bg-red-500 text-white' : 'bg-amber-500 text-slate-950'}">${a.type}</span>
-                            <p class="text-sm font-semibold mt-1">${worker.name}</p>
-                            <p class="text-xs text-slate-400">${new Date(a.timestamp).toLocaleTimeString()}</p>
-                        </div>
+                    <div class="p-3 bg-slate-950 rounded-lg border border-slate-800">
+                        <span class="px-2 py-0.5 rounded text-xs font-bold ${a.type === 'TÉ_NGÃ' ? 'bg-red-500 text-white' : 'bg-amber-500 text-slate-950'}">${a.type}</span>
+                        <p class="text-sm font-semibold mt-1">${w.name}</p>
+                        <p class="text-xs text-slate-400">${new Date(a.timestamp).toLocaleTimeString()}</p>
                     </div>
                 `;
             }).join('');
         }
 
         function renderMedicalAlerts(data) {
-            const medEl = document.getElementById('medical-alerts');
-            if(!medEl) return;
+            const med = document.getElementById('medical-alerts');
+            if(!med) return;
             const falls = data.alerts.filter(a => a.type === 'TÉ_NGÃ');
             if(falls.length === 0) {
-                medEl.innerHTML = `<p class="text-slate-400">Hiện tại không có ca té ngã khẩn cấp nào.</p>`;
+                med.innerHTML = `<p class="text-slate-400">Hiện tại không có ca té ngã khẩn cấp nào.</p>`;
                 return;
             }
-            medEl.innerHTML = falls.map(a => {
-                const worker = data.workers.find(w => w.id === a.worker_id) || { name: 'Nhân viên #' + a.worker_id };
+            med.innerHTML = falls.map(a => {
+                const w = data.workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
                 return `
                     <div class="p-4 bg-red-950/30 border border-red-600/50 rounded-lg flex justify-between items-center">
                         <div>
                             <span class="text-red-400 font-bold">⚠️ PHÁT HIỆN TÉ NGÃ KHẨN CẤP</span>
-                            <p class="text-lg font-bold mt-1">${worker.name} (ID: ${a.worker_id})</p>
-                            <p class="text-sm text-slate-400">Tọa độ GPS: Lat ${a.lat}, Lon ${a.lon}</p>
+                            <p class="text-lg font-bold mt-1">${w.name} (ID: ${a.worker_id})</p>
+                            <p class="text-sm text-slate-400">Tọa độ: Lat ${a.lat}, Lon ${a.lon}</p>
                         </div>
                         <a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank" class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm">Mở Google Maps</a>
                     </div>
@@ -289,18 +299,17 @@
         async function loadWorkerStats() {
             const id = document.getElementById('select-worker-id').value;
             const data = await fetchDashboardState();
-            const worker = data.workers.find(w => w.id === id);
-            const reading = data.readings[id] || { worn: true, battery: 100, fallen: false };
+            const w = data.workers.find(item => item.id === id);
+            const r = data.readings[id] || { worn: true, battery: 100, fallen: false };
 
             document.getElementById('worker-result').innerHTML = `
-                <p class="font-bold text-amber-400">${worker.name} - ${worker.trade}</p>
-                <p class="text-sm mt-1">Trạng thái mũ: <span class="${reading.worn ? 'text-emerald-400' : 'text-amber-500'} font-bold">${reading.worn ? 'Đang đội' : 'Đã tháo'}</span></p>
-                <p class="text-sm">Pin thiết bị: <b>${reading.battery}%</b></p>
-                <p class="text-sm">Trạng thái an toàn: <span class="${reading.fallen ? 'text-red-500 font-bold' : 'text-emerald-400'}">${reading.fallen ? 'CẢNH BÁO TÉ NGÃ!' : 'Bình thường'}</span></p>
+                <p class="font-bold text-amber-400">${w.name} - ${w.trade}</p>
+                <p class="text-sm mt-1">Trạng thái mũ: <span class="${r.worn ? 'text-emerald-400' : 'text-amber-500'} font-bold">${r.worn ? 'Đang đội' : 'Đã tháo'}</span></p>
+                <p class="text-sm">Pin thiết bị: <b>${r.battery}%</b></p>
+                <p class="text-sm">Trạng thái an toàn: <span class="${r.fallen ? 'text-red-500 font-bold' : 'text-emerald-400'}">${r.fallen ? 'CẢNH BÁO TÉ NGÃ!' : 'Bình thường'}</span></p>
             `;
         }
 
-        // Tự động làm mới dữ liệu mỗi 3 giây (Realtime Polling)
         setInterval(async () => {
             const data = await fetchDashboardState();
             if (data && currentRole === 'manager' && map) {
