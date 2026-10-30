@@ -9,44 +9,73 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>.dark { color-scheme: dark; }</style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
-    <div class="p-6 max-w-7xl mx-auto">
-        <header class="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col justify-between">
+    <div class="p-6 max-w-7xl mx-auto w-full">
+        <!-- Header chuyên nghiệp với Đồng hồ và Trạng thái MQTT -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-800 pb-4 gap-4">
             <div class="flex items-center space-x-3">
-                <div class="bg-amber-500 p-2 rounded-xl text-slate-950 font-black text-xl">👷‍♂️ SafeHat</div>
+                <div class="bg-amber-500 p-2.5 rounded-xl text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">👷‍♂️ SafeHat</div>
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight">Hệ Thống Giám Sát An Toàn Lao Động</h1>
-                    <p class="text-sm text-slate-400">Kết nối phần cứng ESP32 thực tế qua Cloud</p>
+                    <h1 class="text-2xl font-bold tracking-tight text-white">Hệ Thống Giám Sát An Toàn Lao Động</h1>
+                    <p class="text-xs text-slate-400">Trường ĐH Bách Khoa TP.HCM (HCMUT) - Đồ án Tự động hóa / Cơ điện tử</p>
                 </div>
             </div>
-            <div class="flex space-x-2">
-                <button onclick="switchRole('worker')" id="btn-worker" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300">Công Nhân</button>
-                <button onclick="switchRole('manager')" id="btn-manager" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold">Quản Lý</button>
-                <button onclick="switchRole('medical')" id="btn-medical" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300">Phòng Y Tế</button>
+
+            <div class="flex items-center space-x-4">
+                <!-- Thẻ trạng thái MQTT Broker & Thời gian thực -->
+                <div class="hidden lg:flex items-center space-x-3 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
+                    <span class="flex items-center text-emerald-400 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5"></span>MQTT Connected</span>
+                    <span class="text-slate-600">|</span>
+                    <span id="realtime-clock" class="text-slate-300 font-mono">00:00:00</span>
+                </div>
+
+                <!-- Role Switcher -->
+                <div id="role-switcher" class="flex space-x-2">
+                    <button onclick="switchRole('worker')" id="btn-worker" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300 hover:bg-slate-700">Công Nhân</button>
+                    <button onclick="switchRole('manager')" id="btn-manager" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold">Quản Lý</button>
+                    <button onclick="switchRole('medical')" id="btn-medical" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300 hover:bg-slate-700">Phòng Y Tế</button>
+                </div>
             </div>
         </header>
+
         <main id="main-content"></main>
     </div>
 
+    <!-- Footer trang trọng cho đồ án -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-4 mt-12 text-center text-xs text-slate-500">
+        <p>SafeHat IoT Industrial Safety Monitoring System &copy; 2026 | Khoa Kỹ thuật Xây dựng & Kỹ thuật Điện - Điện tử | Trường Đại học Bách Khoa – ĐHQG-HCM</p>
+    </footer>
+
     <script>
+        // Đồng hồ thời gian thực ở Header
+        setInterval(() => {
+            const now = new Date();
+            const clockEl = document.getElementById('realtime-clock');
+            if (clockEl) clockEl.innerText = now.toLocaleTimeString();
+        }, 1000);
+
         let currentRole = 'manager';
         let map = null;
         let polygonLayer = null;
         let vertexMarkers = [];
         let workerMarkers = {};
 
-        let siteGeofence = [
+        let siteGeofence = JSON.parse(localStorage.getItem('safehat_geofence')) || [
             [10.7738, 106.6575],
             [10.7752, 106.6582],
             [10.7745, 106.6605],
             [10.7728, 106.6595]
         ];
 
+        function saveGeofence() {
+            localStorage.setItem('safehat_geofence', JSON.stringify(siteGeofence));
+        }
+
         function switchRole(role) {
             currentRole = role;
             ['worker', 'manager', 'medical'].forEach(r => {
                 const btn = document.getElementById('btn-' + r);
-                if(btn) btn.className = r === role ? "px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold" : "px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300";
+                if(btn) btn.className = r === role ? "px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20" : "px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300 hover:bg-slate-700";
             });
             renderView();
         }
@@ -58,40 +87,40 @@
             try {
                 const res = await fetch('/api/dashboard-state');
                 const data = await res.json();
-                if (data && data.geofence && data.geofence.length > 0) {
-                    siteGeofence = data.geofence;
-                }
                 const workers = (data && data.workers) ? data.workers : [];
 
                 if (currentRole === 'manager') {
                     container.innerHTML = `
-                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Đang đội mũ & Trong vùng</p><p class="text-3xl font-bold text-emerald-400" id="stat-safe">0</p></div>
-                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Công nhân tháo mũ</p><p class="text-3xl font-bold text-amber-500" id="stat-warning">0</p></div>
-                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Ca té ngã khẩn cấp</p><p class="text-3xl font-bold text-red-500" id="stat-fall">0</p></div>
-                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl"><p class="text-sm text-slate-400">Tổng cảnh báo</p><p class="text-3xl font-bold text-rose-400" id="stat-alerts">0</p></div>
+                        <!-- Thêm KPI Cards nâng cấp (Có thêm tỷ lệ tuân thủ an toàn %) -->
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Đang đội & Trong vùng</p><p class="text-3xl font-bold text-emerald-400 mt-1" id="stat-safe">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Công nhân tháo mũ</p><p class="text-3xl font-bold text-amber-500 mt-1" id="stat-warning">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Ca té ngã khẩn cấp</p><p class="text-3xl font-bold text-red-500 mt-1" id="stat-fall">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Tổng cảnh báo</p><p class="text-3xl font-bold text-rose-400 mt-1" id="stat-alerts">0</p></div>
+                            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm border-l-4 border-l-amber-500"><p class="text-xs text-slate-400 uppercase font-semibold">Tuân thủ an toàn</p><p class="text-3xl font-bold text-amber-400 mt-1" id="stat-compliance">100%</p></div>
                         </div>
+
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
                                 <div class="flex justify-between items-center mb-3">
-                                    <h2 class="font-semibold text-lg text-amber-400">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
+                                    <h2 class="font-semibold text-lg text-amber-400 flex items-center gap-2">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
                                     <div class="flex items-center space-x-2">
-                                        <span class="text-xs text-slate-400">📍 Locate:</span>
-                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold">
+                                        <span class="text-xs text-slate-400 font-medium">📍 Locate:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold focus:outline-none focus:border-amber-500">
                                             <option value="">-- Chọn công nhân --</option>
                                             ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
                                         </select>
                                     </div>
                                 </div>
-                                <div id="map" class="h-[450px] w-full rounded-lg"></div>
+                                <div id="map" class="h-[480px] w-full rounded-lg border border-slate-800"></div>
                                 <div class="mt-3 flex gap-2">
-                                    <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded">Đặt lại mặc định</button>
+                                    <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded shadow transition">Đặt lại mặc định</button>
                                     <span class="text-xs text-slate-400 self-center" id="geofence-status">Đang có ${siteGeofence.length} điểm.</span>
                                 </div>
                             </div>
-                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
-                                <h2 class="font-semibold text-lg text-amber-400 mb-3">🚨 Danh Sách Cảnh Báo</h2>
-                                <div class="space-y-3 overflow-y-auto max-h-[420px]" id="alerts-list"><p class="text-sm text-slate-500">Trống</p></div>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col shadow-xl">
+                                <h2 class="font-semibold text-lg text-amber-400 mb-3 flex items-center gap-2">🚨 Danh Sách Cảnh Báo</h2>
+                                <div class="space-y-3 overflow-y-auto max-h-[420px] pr-1" id="alerts-list"><p class="text-sm text-slate-500">Trống</p></div>
                             </div>
                         </div>`;
                     setTimeout(() => initMap(data, true), 50);
@@ -99,20 +128,20 @@
                 } else if (currentRole === 'medical') {
                     container.innerHTML = `
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+                            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
                                 <div class="flex justify-between items-center mb-3">
-                                    <h2 class="font-semibold text-lg text-red-500">🏥 Bản Đồ Y Tế Định Vị Khẩn Cấp (Đồng Bộ)</h2>
+                                    <h2 class="font-semibold text-lg text-red-500 flex items-center gap-2">🏥 Bản Đồ Y Tế Định Vị Khẩn Cấp</h2>
                                     <div class="flex items-center space-x-2">
-                                        <span class="text-xs text-slate-400">📍 Định vị:</span>
-                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-red-400 rounded p-1.5 font-bold">
+                                        <span class="text-xs text-slate-400 font-medium">📍 Định vị:</span>
+                                        <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-red-400 rounded p-1.5 font-bold focus:outline-none focus:border-red-500">
                                             <option value="">-- Chọn công nhân --</option>
                                             ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
                                         </select>
                                     </div>
                                 </div>
-                                <div id="map" class="h-[480px] w-full rounded-lg"></div>
+                                <div id="map" class="h-[480px] w-full rounded-lg border border-slate-800"></div>
                             </div>
-                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col shadow-xl">
                                 <h2 class="text-lg font-bold text-red-500 mb-2">🚨 Ca Té Ngã Hiện Tại</h2>
                                 <div class="space-y-3 overflow-y-auto max-h-[170px] mb-3 border-b border-slate-800 pb-3" id="medical-alerts"><p class="text-slate-400 text-xs">Đang quét...</p></div>
 
@@ -124,21 +153,21 @@
 
                 } else {
                     container.innerHTML = `
-                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-xl mx-auto">
-                            <h2 class="text-xl font-bold text-amber-400 mb-4">👷‍♂️ Cổng Thông Tin Công Nhân</h2>
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-xl mx-auto shadow-xl">
+                            <h2 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">👷‍♂️ Cổng Thông Tin Công Nhân</h2>
                             <div class="space-y-4">
                                 <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
-                                <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white">
+                                <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:outline-none focus:border-amber-500">
                                     ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
                                 </select>
-                                <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2 rounded-lg hover:bg-amber-400">Xem Trạng Thái</button>
-                                <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500">Chưa chọn.</p></div>
+                                <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2.5 rounded-lg hover:bg-amber-400 transition shadow-lg shadow-amber-500/20">Xem Trạng Thái</button>
+                                <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500 text-sm">Vui lòng chọn công nhân để tra cứu.</p></div>
                             </div>
                         </div>`;
                 }
             } catch (err) {
                 console.error(err);
-                container.innerHTML = `<div class="p-6 text-red-400">Lỗi tải giao diện! Vui lòng F5 lại trang.</div>`;
+                container.innerHTML = `<div class="p-6 text-red-400 bg-red-950/20 border border-red-900 rounded-xl">Lỗi kết nối Server! Vui lòng kiểm tra lại backend.</div>`;
             }
         }
 
@@ -156,6 +185,7 @@
             if (isEditable) {
                 map.on('click', e => {
                     siteGeofence.push([e.latlng.lat, e.latlng.lng]);
+                    saveGeofence();
                     drawGeofence(true);
                 });
             }
@@ -172,6 +202,7 @@
                 [10.7745, 106.6605],
                 [10.7728, 106.6595]
             ];
+            saveGeofence();
             drawGeofence(true);
         }
 
@@ -186,16 +217,21 @@
             if (isEditable) {
                 siteGeofence.forEach((coord, idx) => {
                     const marker = L.marker(coord, {
-                        icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white;"></div>`, className: '' }),
+                        icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
                         draggable: true
                     }).addTo(map);
 
                     marker.on('drag', e => {
                         siteGeofence[idx] = [e.target.getLatLng().lat, e.target.getLatLng().lng];
                         polygonLayer.setLatLngs(siteGeofence);
+                        saveGeofence();
                     });
                     marker.on('dblclick', () => {
-                        if (siteGeofence.length > 3) { siteGeofence.splice(idx, 1); drawGeofence(true); }
+                        if (siteGeofence.length > 3) {
+                            siteGeofence.splice(idx, 1);
+                            saveGeofence();
+                            drawGeofence(true);
+                        }
                     });
                     vertexMarkers.push(marker);
                 });
@@ -213,7 +249,6 @@
 
             workers.forEach((w, index) => {
                 let r = readings[w.id];
-                // Đã fix lại kinh độ thành 106.6585 để trả về VN thay vì Nigeria
                 let lat = r ? r.lat : (10.7738 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
                 let lon = r ? r.lon : (106.6585 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
                 let worn = r ? r.worn : true;
@@ -234,6 +269,12 @@
             if(document.getElementById('stat-safe')) document.getElementById('stat-safe').innerText = safe;
             if(document.getElementById('stat-warning')) document.getElementById('stat-warning').innerText = warning;
             if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fall;
+
+            // Tính tỷ lệ tuân thủ an toàn (%)
+            if(document.getElementById('stat-compliance') && workers.length > 0) {
+                const complianceRate = Math.round((safe / workers.length) * 100);
+                document.getElementById('stat-compliance').innerText = complianceRate + '%';
+            }
         }
 
         function locateWorker() {
@@ -250,7 +291,7 @@
         function updateAlerts(alerts, workers) {
             const list = document.getElementById('alerts-list');
             if(!list) return;
-            if(!alerts || alerts.length === 0) { list.innerHTML = `<p class="text-sm text-slate-500">Chưa có cảnh báo.</p>`; return; }
+            if(!alerts || alerts.length === 0) { list.innerHTML = `<p class="text-sm text-slate-500">Chưa có cảnh báo nào.</p>`; return; }
             list.innerHTML = alerts.map(a => {
                 const w = workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
                 return `<div class="p-3 bg-slate-950 rounded-lg border border-slate-800"><span class="px-2 py-0.5 rounded text-xs font-bold ${a.type === 'TÉ_NGÃ' ? 'bg-red-500 text-white' : 'bg-amber-500 text-slate-950'}">${a.type}</span><p class="text-sm font-semibold mt-1">${w.name}</p></div>`;
@@ -268,7 +309,7 @@
             } else {
                 med.innerHTML = falls.map(a => {
                     const w = data.workers.find(item => item.id === a.worker_id) || { name: 'ID #' + a.worker_id };
-                    return `<div class="p-3 bg-red-950/40 border border-red-600 rounded-lg"><p class="text-white font-bold text-sm">${w.name}</p><a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank" class="mt-2 block text-center py-1 bg-red-600 text-white rounded text-xs font-bold">Mở Maps Cứu Hộ</a></div>`;
+                    return `<div class="p-3 bg-red-950/40 border border-red-600 rounded-lg"><p class="text-white font-bold text-sm">${w.name}</p><a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank" class="mt-2 block text-center py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-500 transition">Mở Maps Cứu Hộ</a></div>`;
                 }).join('');
             }
 
