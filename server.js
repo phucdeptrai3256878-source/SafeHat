@@ -123,3 +123,88 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[SafeHat Server] Đang lắng nghe tại cổng ${PORT}`);
 });
+
+const mqtt = require('mqtt');
+
+// Kết nối đến Mosquitto MQTT Broker công cộng
+const mqttClient = mqtt.connect('mqtt://test.mosquitto.org:1883');
+
+mqttClient.on('connect', () => {
+    console.log('[MQTT] Đã kết nối thành công với test.mosquitto.org!');
+    // Subscribe đúng topic mà bạn của bạn đang cho ESP32 publish lên
+    // (Bạn nhớ hỏi lại bạn mình xem đang dùng chính xác topic gì, ví dụ: "safehat/device/telemetry")
+    mqttClient.subscribe('safehat/device/telemetry', (err) => {
+        if (!err) {
+            console.log('[MQTT] Đã subscribe topic: safehat/device/telemetry');
+        }
+    });
+});
+
+// Khi có tin nhắn từ ESP32 gửi lên broker
+mqttClient.on('message', async (topic, message) => {
+    try {
+        const payload = JSON.parse(message.toString());
+        console.log('[MQTT Received]:', payload);
+
+        // payload từ ESP32 gửi lên thường có dạng:
+        // { id: "001", name: "Nguyễn Văn An", trade: "Thợ cốt pha", worn: true, battery: 90, lat: 10.7738, lon: 106.6585, fallen: false }
+
+        // Tự động gọi nội bộ logic xử lý như API /api/helmet-ping
+        // Hoặc bạn có thể giả lập request gửi vào hệ thống:
+        processHelmetData(payload);
+    } catch (e) {
+        console.error('[MQTT Error] Không parse được JSON:', e);
+    }
+});
+
+// Hàm xử lý dữ liệu chung cho cả API lẫn MQTT
+function processHelmetData(data) {
+    const { id, name, trade, worn, battery, lat, lon, fallen } = data;
+    if (!id) return;
+
+    let worker = workers.find(w => w.id === id);
+    if (!worker) {
+        workers.push({
+            id: id,
+            name: name || `Công nhân ID ${id}`,
+            trade: trade || "Thợ chính"
+        });
+    }
+
+    const inZone = isPointInCircle([lat, lon], siteSettings.center, siteSettings.radius);
+
+    helmetReadings[id] = {
+        worker_id: id,
+        worn: Boolean(worn),
+        battery: Number(battery) || 100,
+        lat: Number(lat) || 0.0,
+        lon: Number(lon) || 0.0,
+        fallen: Boolean(fallen),
+        updated_at: new Date().toISOString()
+    };
+
+    if (fallen === true) {
+        alerts.unshift({
+            id: 'alt_' + Date.now(),
+            worker_id: id,
+            type: 'TÉ_NGÃ',
+            lat,
+            lon,
+            timestamp: new Date().toISOString(),
+            resolved: false
+        });
+    } else if (worn === false && inZone) {
+        const alreadyAlerted = alerts.some(a => a.worker_id === id && a.type === 'THÁO_MŨ' && !a.resolved);
+        if (!alreadyAlerted) {
+            alerts.unshift({
+                id: 'alt_' + Date.now(),
+                worker_id: id,
+                type: 'THÁO_MŨ',
+                lat,
+                lon,
+                timestamp: new Date().toISOString(),
+                resolved: false
+            });
+        }
+    }
+}
