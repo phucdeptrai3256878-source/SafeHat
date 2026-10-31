@@ -56,9 +56,8 @@
         let edgeMarker = null;
         let workerMarkers = {};
 
-        // Lưu trữ tâm và bán kính hình tròn (mặc định lấy từ localStorage nếu có)
         let siteCenter = JSON.parse(localStorage.getItem('safehat_center')) || [10.7738, 106.6585];
-        let siteRadius = parseFloat(localStorage.getItem('safehat_radius')) || 300; // mét
+        let siteRadius = parseFloat(localStorage.getItem('safehat_radius')) || 300;
 
         function saveGeofence() {
             localStorage.setItem('safehat_center', JSON.stringify(siteCenter));
@@ -96,11 +95,11 @@
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
                                 <div class="flex justify-between items-center mb-3">
-                                    <h2 class="font-semibold text-lg text-amber-400 flex items-center gap-2">🗺️ Bản Đồ Vùng An Toàn (Hình Tròn Tùy Chỉnh)</h2>
+                                    <h2 class="font-semibold text-lg text-amber-400 flex items-center gap-2">🗺️ Bản Đồ Vùng An Toàn (Hình Tròn)</h2>
                                     <div class="flex items-center space-x-2">
                                         <span class="text-xs text-slate-400 font-medium">📍 Locate:</span>
                                         <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold focus:outline-none focus:border-amber-500">
-                                            <option value="">-- Chọn công nhân --</option>
+                                            <option value="">-- Chưa có thiết bị --</option>
                                             ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
                                         </select>
                                     </div>
@@ -127,7 +126,7 @@
                                     <div class="flex items-center space-x-2">
                                         <span class="text-xs text-slate-400 font-medium">📍 Định vị:</span>
                                         <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-red-400 rounded p-1.5 font-bold focus:outline-none focus:border-red-500">
-                                            <option value="">-- Chọn công nhân --</option>
+                                            <option value="">-- Chưa có thiết bị --</option>
                                             ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name}</option>`).join('')}
                                         </select>
                                     </div>
@@ -151,10 +150,11 @@
                             <div class="space-y-4">
                                 <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
                                 <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:outline-none focus:border-amber-500">
-                                    ${workers.length === 0 ? '<option value="">-- Chưa có công nhân nào --</option>' : workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
+                                    <option value="">-- Chưa có thiết bị kết nối --</option>
+                                    ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
                                 </select>
                                 <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2.5 rounded-lg hover:bg-amber-400 transition shadow-lg shadow-amber-500/20">Xem Trạng Thái</button>
-                                <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500 text-sm">Vui lòng chọn công nhân để tra cứu.</p></div>
+                                <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500 text-sm">Chưa có dữ liệu từ thiết bị.</p></div>
                             </div>
                         </div>`;
                 }
@@ -205,13 +205,11 @@
             }).addTo(map);
 
             if (isEditable) {
-                // Marker tâm (Đỏ) để dịch chuyển toàn bộ vòng tròn
                 centerMarker = L.marker(siteCenter, {
                     icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
                     draggable: true
                 }).addTo(map).bindTooltip("Kéo để di chuyển vùng an toàn", {direction: 'top'});
 
-                // Marker viền biên (Xanh dương) để kéo co giãn bán kính
                 let edgeLatLng = calculateEdgePoint(siteCenter[0], siteCenter[1], siteRadius);
                 edgeMarker = L.marker(edgeLatLng, {
                     icon: L.divIcon({ html: `<div style="background:#3b82f6; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
@@ -230,7 +228,7 @@
                 edgeMarker.on('drag', e => {
                     const pos = e.target.getLatLng();
                     const dist = map.distance(L.latLng(siteCenter[0], siteCenter[1]), pos);
-                    siteRadius = Math.max(30, Math.round(dist)); // tối thiểu 30m
+                    siteRadius = Math.max(30, Math.round(dist));
                     circleLayer.setRadius(siteRadius);
                     saveGeofence();
                     const status = document.getElementById('geofence-status');
@@ -348,6 +346,7 @@
             const select = document.getElementById('select-worker-id');
             if (!select) return;
             const id = select.value;
+            if(!id) return;
             const res = await fetch('/api/dashboard-state');
             const data = await res.json();
             const w = data.workers.find(item => item.id === id);

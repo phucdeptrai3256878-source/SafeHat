@@ -7,36 +7,37 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// In-Memory Database (hoặc thay bằng PostgreSQL / SQLite)
+// Cấu hình vùng an toàn hình tròn (Tâm và Bán kính mét)
 let siteSettings = {
-  geofence: [
-    [10.7760, 106.7000],
-    [10.7780, 106.7002],
-    [10.7782, 106.7025],
-    [10.7761, 106.7023]
-  ]
+  center: [10.7738, 106.6585],
+  radius: 300 // mét
 };
 
-let workers = [
-  { id: "001", name: "Nguyễn Văn An", trade: "Thợ cốt pha" },
-  { id: "002", name: "Lê Văn Hùng", trade: "Thợ sắt giàn giáo" }
-];
+// Xóa sạch danh sách mẫu để chờ dữ liệu thật từ thiết bị gửi lên
+let workers = [];
 
 let helmetReadings = {};
 let alerts = [];
 
-// Thuật toán Ray-Casting kiểm tra điểm nằm trong đa giác
-function isPointInPolygon(point, polygon) {
+// Hàm tính khoảng cách giữa 2 tọa độ GPS (trả về mét)
+function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Bán kính trái đất tính bằng mét
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Kiểm tra điểm có nằm trong vùng hình tròn an toàn không
+function isPointInCircle(point, center, radiusMeters) {
   const [lat, lon] = point;
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
-    const intersect = ((yi > lon) !== (yj > lon)) &&
-        (lat < (xj - xi) * (lon - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
+  const [cLat, cLon] = center;
+  const distance = getDistanceFromLatLonInMeters(lat, lon, cLat, cLon);
+  return distance <= radiusMeters;
 }
 
 // ==========================================
@@ -44,15 +45,26 @@ function isPointInPolygon(point, polygon) {
 // POST /api/helmet-ping
 // ==========================================
 app.post('/api/helmet-ping', (req, res) => {
-  const { id, worn, battery, lat, lon, fallen } = req.body;
+  const { id, name, trade, worn, battery, lat, lon, fallen } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "Thiếu trường 'id' của mũ!" });
   }
 
-  const inZone = isPointInPolygon([lat, lon], siteSettings.geofence);
+  // Tự động thêm worker mới vào danh sách nếu thiết bị lần đầu gửi lên
+  let worker = workers.find(w => w.id === id);
+  if (!worker) {
+    worker = {
+      id: id,
+      name: name || `Công nhân ID ${id}`,
+      trade: trade || "Kỹ thuật viên / Thợ chính"
+    };
+    workers.push(worker);
+  }
 
-  // 1. Cập nhật bảng helmet_readings
+  const inZone = isPointInCircle([lat, lon], siteSettings.center, siteSettings.radius);
+
+  // 1. Cập nhật trạng thái thiết bị
   helmetReadings[id] = {
     worker_id: id,
     worn: Boolean(worn),
@@ -75,7 +87,6 @@ app.post('/api/helmet-ping', (req, res) => {
       resolved: false
     });
   } else if (worn === false && inZone) {
-    // Tháo mũ khi đang ở trong vùng bắt buộc
     const alreadyAlerted = alerts.some(a => a.worker_id === id && a.type === 'THÁO_MŨ' && !a.resolved);
     if (!alreadyAlerted) {
       alerts.unshift({
@@ -103,7 +114,7 @@ app.get('/api/dashboard-state', (req, res) => {
     workers,
     readings: helmetReadings,
     alerts,
-    geofence: siteSettings.geofence
+    geofence: siteSettings // Trả về thông tin hình tròn để đồng bộ
   });
 });
 
