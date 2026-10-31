@@ -51,19 +51,18 @@
 
         let currentRole = 'manager';
         let map = null;
-        let polygonLayer = null;
-        let vertexMarkers = [];
+        let circleLayer = null;
+        let centerMarker = null;
+        let edgeMarker = null;
         let workerMarkers = {};
 
-        let siteGeofence = JSON.parse(localStorage.getItem('safehat_geofence')) || [
-            [10.7738, 106.6575],
-            [10.7752, 106.6582],
-            [10.7745, 106.6605],
-            [10.7728, 106.6595]
-        ];
+        // Lưu trữ tâm và bán kính hình tròn (mặc định lấy từ localStorage nếu có)
+        let siteCenter = JSON.parse(localStorage.getItem('safehat_center')) || [10.7738, 106.6585];
+        let siteRadius = parseFloat(localStorage.getItem('safehat_radius')) || 300; // mét
 
         function saveGeofence() {
-            localStorage.setItem('safehat_geofence', JSON.stringify(siteGeofence));
+            localStorage.setItem('safehat_center', JSON.stringify(siteCenter));
+            localStorage.setItem('safehat_radius', siteRadius);
         }
 
         function switchRole(role) {
@@ -97,7 +96,7 @@
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
                                 <div class="flex justify-between items-center mb-3">
-                                    <h2 class="font-semibold text-lg text-amber-400 flex items-center gap-2">🗺️ Bản Đồ Quản Lý & Kéo Thả Geofence</h2>
+                                    <h2 class="font-semibold text-lg text-amber-400 flex items-center gap-2">🗺️ Bản Đồ Vùng An Toàn (Hình Tròn Tùy Chỉnh)</h2>
                                     <div class="flex items-center space-x-2">
                                         <span class="text-xs text-slate-400 font-medium">📍 Locate:</span>
                                         <select id="locate-worker-select" onchange="locateWorker()" class="bg-slate-800 border border-slate-700 text-xs text-amber-400 rounded p-1.5 font-bold focus:outline-none focus:border-amber-500">
@@ -107,9 +106,9 @@
                                     </div>
                                 </div>
                                 <div id="map" class="h-[480px] w-full rounded-lg border border-slate-800"></div>
-                                <div class="mt-3 flex gap-2">
+                                <div class="mt-3 flex justify-between items-center">
                                     <button onclick="resetGeofence()" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded shadow transition">Đặt lại mặc định</button>
-                                    <span class="text-xs text-slate-400 self-center" id="geofence-status">Đang có ${siteGeofence.length} điểm.</span>
+                                    <span class="text-xs text-slate-400" id="geofence-status">Bán kính: ${siteRadius}m</span>
                                 </div>
                             </div>
                             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col shadow-xl">
@@ -152,7 +151,7 @@
                             <div class="space-y-4">
                                 <label class="block text-sm text-slate-400">Chọn ID Mũ / Công nhân:</label>
                                 <select id="select-worker-id" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white font-medium focus:outline-none focus:border-amber-500">
-                                    ${workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
+                                    ${workers.length === 0 ? '<option value="">-- Chưa có công nhân nào --</option>' : workers.map(w => `<option value="${w.id}">${w.id} - ${w.name} (${w.trade})</option>`).join('')}
                                 </select>
                                 <button onclick="loadWorkerStats()" class="w-full bg-amber-500 text-slate-950 font-bold py-2.5 rounded-lg hover:bg-amber-400 transition shadow-lg shadow-amber-500/20">Xem Trạng Thái</button>
                                 <div id="worker-result" class="mt-4 p-4 bg-slate-950 rounded-lg border border-slate-800"><p class="text-slate-500 text-sm">Vui lòng chọn công nhân để tra cứu.</p></div>
@@ -170,69 +169,83 @@
             const mapEl = document.getElementById('map');
             if (!mapEl) return;
 
-            map = L.map('map').setView([10.7738, 106.6585], 17);
+            map = L.map('map').setView(siteCenter, 17);
             L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
                 maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google Maps'
             }).addTo(map);
 
-            drawGeofence(isEditable);
-            if (isEditable) {
-                map.on('click', e => {
-                    siteGeofence.push([e.latlng.lat, e.latlng.lng]);
-                    saveGeofence();
-                    drawGeofence(true);
-                });
-            }
+            drawCircleGeofence(isEditable);
+
             if (data && data.readings && data.workers) {
                 updateWorkers(data.readings, data.workers);
                 if (isEditable) updateAlerts(data.alerts, data.workers);
             }
         }
 
-        function resetGeofence() {
-            siteGeofence = [
-                [10.7738, 106.6575],
-                [10.7752, 106.6582],
-                [10.7745, 106.6605],
-                [10.7728, 106.6595]
-            ];
-            saveGeofence();
-            drawGeofence(true);
+        function calculateEdgePoint(lat, lon, radiusMeters) {
+            const R = 6378137;
+            const rad = Math.PI / 180;
+            const dLat = (radiusMeters / R) * (180 / Math.PI);
+            const dLon = (radiusMeters / (R * Math.cos(lat * rad))) * (180 / Math.PI);
+            return [lat, lon + dLon];
         }
 
-        function drawGeofence(isEditable) {
+        function drawCircleGeofence(isEditable) {
             if (!map) return;
-            if (polygonLayer) map.removeLayer(polygonLayer);
-            vertexMarkers.forEach(m => map.removeLayer(m));
-            vertexMarkers = [];
+            if (circleLayer) map.removeLayer(circleLayer);
+            if (centerMarker) map.removeLayer(centerMarker);
+            if (edgeMarker) map.removeLayer(edgeMarker);
 
-            polygonLayer = L.polygon(siteGeofence, { color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.25, weight: 2 }).addTo(map);
+            circleLayer = L.circle(siteCenter, {
+                color: '#f59e0b',
+                fillColor: '#f59e0b',
+                fillOpacity: 0.25,
+                radius: siteRadius,
+                weight: 2
+            }).addTo(map);
 
             if (isEditable) {
-                siteGeofence.forEach((coord, idx) => {
-                    const marker = L.marker(coord, {
-                        icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
-                        draggable: true
-                    }).addTo(map);
+                // Marker tâm (Đỏ) để dịch chuyển toàn bộ vòng tròn
+                centerMarker = L.marker(siteCenter, {
+                    icon: L.divIcon({ html: `<div style="background:#ef4444; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
+                    draggable: true
+                }).addTo(map).bindTooltip("Kéo để di chuyển vùng an toàn", {direction: 'top'});
 
-                    marker.on('drag', e => {
-                        siteGeofence[idx] = [e.target.getLatLng().lat, e.target.getLatLng().lng];
-                        polygonLayer.setLatLngs(siteGeofence);
-                        saveGeofence();
-                    });
-                    marker.on('dblclick', () => {
-                        if (siteGeofence.length > 3) {
-                            siteGeofence.splice(idx, 1);
-                            saveGeofence();
-                            drawGeofence(true);
-                        }
-                    });
-                    vertexMarkers.push(marker);
+                // Marker viền biên (Xanh dương) để kéo co giãn bán kính
+                let edgeLatLng = calculateEdgePoint(siteCenter[0], siteCenter[1], siteRadius);
+                edgeMarker = L.marker(edgeLatLng, {
+                    icon: L.divIcon({ html: `<div style="background:#3b82f6; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, className: '' }),
+                    draggable: true
+                }).addTo(map).bindTooltip("Kéo để mở rộng / thu nhỏ bán kính", {direction: 'top'});
+
+                centerMarker.on('drag', e => {
+                    const pos = e.target.getLatLng();
+                    siteCenter = [pos.lat, pos.lng];
+                    circleLayer.setLatLng(siteCenter);
+                    let newEdge = calculateEdgePoint(siteCenter[0], siteCenter[1], siteRadius);
+                    edgeMarker.setLatLng(newEdge);
+                    saveGeofence();
                 });
 
-                const status = document.getElementById('geofence-status');
-                if (status) status.innerText = `Đang có ${siteGeofence.length} điểm.`;
+                edgeMarker.on('drag', e => {
+                    const pos = e.target.getLatLng();
+                    const dist = map.distance(L.latLng(siteCenter[0], siteCenter[1]), pos);
+                    siteRadius = Math.max(30, Math.round(dist)); // tối thiểu 30m
+                    circleLayer.setRadius(siteRadius);
+                    saveGeofence();
+                    const status = document.getElementById('geofence-status');
+                    if (status) status.innerText = `Bán kính: ${siteRadius}m`;
+                });
             }
+        }
+
+        function resetGeofence() {
+            siteCenter = [10.7738, 106.6585];
+            siteRadius = 300;
+            saveGeofence();
+            drawCircleGeofence(true);
+            const status = document.getElementById('geofence-status');
+            if (status) status.innerText = `Bán kính: ${siteRadius}m`;
         }
 
         function updateWorkers(readings, workers) {
@@ -243,7 +256,6 @@
 
             workers.forEach(w => {
                 let r = readings[w.id];
-                // Chỉ hiển thị marker khi có dữ liệu từ thiết bị gửi lên, không tạo ngẫu nhiên nữa
                 if (!r) return;
 
                 let lat = r.lat;
@@ -339,6 +351,7 @@
             const res = await fetch('/api/dashboard-state');
             const data = await res.json();
             const w = data.workers.find(item => item.id === id);
+            if (!w) return;
             const r = data.readings[id];
 
             if (!r) {
