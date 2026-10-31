@@ -11,25 +11,22 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col justify-between">
     <div class="p-6 max-w-7xl mx-auto w-full">
-        <!-- Header chuyên nghiệp với Đồng hồ và Trạng thái MQTT -->
+        <!-- Header -->
         <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-800 pb-4 gap-4">
             <div class="flex items-center space-x-3">
                 <div class="bg-amber-500 p-2.5 rounded-xl text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">👷‍♂️ SafeHat</div>
                 <div>
                     <h1 class="text-2xl font-bold tracking-tight text-white">Hệ Thống Giám Sát An Toàn Lao Động</h1>
-                    <p class="text-xs text-slate-400">Trường ĐH Bách Khoa TP.HCM (HCMUT) - Đồ án Tự động hóa / Cơ điện tử</p>
                 </div>
             </div>
 
             <div class="flex items-center space-x-4">
-                <!-- Thẻ trạng thái MQTT Broker & Thời gian thực -->
                 <div class="hidden lg:flex items-center space-x-3 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
                     <span class="flex items-center text-emerald-400 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5"></span>MQTT Connected</span>
                     <span class="text-slate-600">|</span>
                     <span id="realtime-clock" class="text-slate-300 font-mono">00:00:00</span>
                 </div>
 
-                <!-- Role Switcher -->
                 <div id="role-switcher" class="flex space-x-2">
                     <button onclick="switchRole('worker')" id="btn-worker" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-300 hover:bg-slate-700">Công Nhân</button>
                     <button onclick="switchRole('manager')" id="btn-manager" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-amber-500 text-slate-950 font-bold">Quản Lý</button>
@@ -41,13 +38,11 @@
         <main id="main-content"></main>
     </div>
 
-    <!-- Footer trang trọng cho đồ án -->
     <footer class="border-t border-slate-900 bg-slate-950 py-4 mt-12 text-center text-xs text-slate-500">
         <p>SafeHat IoT Industrial Safety Monitoring System &copy; 2026 | Khoa Kỹ thuật Xây dựng & Kỹ thuật Điện - Điện tử | Trường Đại học Bách Khoa – ĐHQG-HCM</p>
     </footer>
 
     <script>
-        // Đồng hồ thời gian thực ở Header
         setInterval(() => {
             const now = new Date();
             const clockEl = document.getElementById('realtime-clock');
@@ -91,7 +86,6 @@
 
                 if (currentRole === 'manager') {
                     container.innerHTML = `
-                        <!-- Thêm KPI Cards nâng cấp (Có thêm tỷ lệ tuân thủ an toàn %) -->
                         <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
                             <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Đang đội & Trong vùng</p><p class="text-3xl font-bold text-emerald-400 mt-1" id="stat-safe">0</p></div>
                             <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-sm"><p class="text-xs text-slate-400 uppercase font-semibold">Công nhân tháo mũ</p><p class="text-3xl font-bold text-amber-500 mt-1" id="stat-warning">0</p></div>
@@ -247,13 +241,16 @@
             workerMarkers = {};
             let safe = 0, warning = 0, fall = 0;
 
-            workers.forEach((w, index) => {
+            workers.forEach(w => {
                 let r = readings[w.id];
-                let lat = r ? r.lat : (10.7738 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
-                let lon = r ? r.lon : (106.6585 + (index * 0.0006) + (Math.random() - 0.5) * 0.0003);
-                let worn = r ? r.worn : true;
-                let fallen = r ? r.fallen : false;
-                let battery = r ? r.battery : 100;
+                // Chỉ hiển thị marker khi có dữ liệu từ thiết bị gửi lên, không tạo ngẫu nhiên nữa
+                if (!r) return;
+
+                let lat = r.lat;
+                let lon = r.lon;
+                let worn = r.worn;
+                let fallen = r.fallen;
+                let battery = r.battery || 100;
 
                 let color = '#22c55e';
                 if (fallen) { color = '#ef4444'; fall++; }
@@ -270,9 +267,9 @@
             if(document.getElementById('stat-warning')) document.getElementById('stat-warning').innerText = warning;
             if(document.getElementById('stat-fall')) document.getElementById('stat-fall').innerText = fall;
 
-            // Tính tỷ lệ tuân thủ an toàn (%)
             if(document.getElementById('stat-compliance') && workers.length > 0) {
-                const complianceRate = Math.round((safe / workers.length) * 100);
+                const totalActive = safe + warning + fall;
+                const complianceRate = totalActive > 0 ? Math.round((safe / totalActive) * 100) : 100;
                 document.getElementById('stat-compliance').innerText = complianceRate + '%';
             }
         }
@@ -285,6 +282,8 @@
                 const marker = workerMarkers[id];
                 map.flyTo(marker.getLatLng(), 19, { duration: 1.2 });
                 marker.openPopup();
+            } else {
+                alert("Công nhân này chưa gửi dữ liệu vị trí thực tế lên hệ thống!");
             }
         }
 
@@ -340,14 +339,20 @@
             const res = await fetch('/api/dashboard-state');
             const data = await res.json();
             const w = data.workers.find(item => item.id === id);
-            const r = data.readings[id] || { worn: true, battery: 100, fallen: false };
+            const r = data.readings[id];
+
+            if (!r) {
+                document.getElementById('worker-result').innerHTML = `<p class="text-amber-400 text-sm">Thiết bị của ${w.name} chưa gửi dữ liệu lên Cloud.</p>`;
+                return;
+            }
+
             const alertCount = data.alerts ? data.alerts.filter(a => a.worker_id === id).length : 0;
 
             document.getElementById('worker-result').innerHTML = `
                 <div class="space-y-2">
                     <p class="font-bold text-amber-400 text-lg">${w.name} - ${w.trade}</p>
                     <p class="text-sm">Trạng thái mũ: <span class="${r.worn ? 'text-emerald-400 font-bold' : 'text-amber-500 font-bold'}">${r.worn ? 'Đang đội' : 'Đã tháo mũ'}</span></p>
-                    <p class="text-sm">Mức pin thiết bị: <b>${r.battery}%</b></p>
+                    <p class="text-sm">Mức pin thiết bị: <b>${r.battery || 100}%</b></p>
                     <p class="text-sm">Trạng thái té ngã: <span class="${r.fallen ? 'text-red-500 font-bold' : 'text-emerald-400'}">${r.fallen ? 'ĐANG BỊ TÉ NGÃ!' : 'An toàn'}</span></p>
                     <div class="mt-3 pt-3 border-t border-slate-800 flex justify-between items-center">
                         <span class="text-sm text-slate-400">Số lần ghi nhận cảnh báo:</span>
