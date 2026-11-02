@@ -1,8 +1,19 @@
 // server.js - Backend Node.js / Express cho SafeHat
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
+const mqtt = require('mqtt');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
@@ -13,9 +24,8 @@ let siteSettings = {
   radius: 300 // mét
 };
 
-// Xóa sạch danh sách mẫu để chờ dữ liệu thật từ thiết bị gửi lên
+// Danh sách thiết bị và dữ liệu
 let workers = [];
-
 let helmetReadings = {};
 let alerts = [];
 
@@ -40,18 +50,11 @@ function isPointInCircle(point, center, radiusMeters) {
   return distance <= radiusMeters;
 }
 
-// ==========================================
-// API NHẬN DỮ LIỆU TỪ ESP32 THẬT
-// POST /api/helmet-ping
-// ==========================================
-app.post('/api/helmet-ping', (req, res) => {
-  const { id, name, trade, worn, battery, lat, lon, fallen } = req.body;
+// Hàm xử lý dữ liệu chung cho cả API lẫn MQTT
+function processHelmetData(data) {
+  const { id, name, trade, worn, battery, lat, lon, fallen } = data;
+  if (!id) return;
 
-  if (!id) {
-    return res.status(400).json({ error: "Thiếu trường 'id' của mũ!" });
-  }
-
-  // Tự động thêm worker mới vào danh sách nếu thiết bị lần đầu gửi lên
   let worker = workers.find(w => w.id === id);
   if (!worker) {
     worker = {
@@ -101,6 +104,23 @@ app.post('/api/helmet-ping', (req, res) => {
     }
   }
 
+  // 3. Bắn dữ liệu cập nhật và tín hiệu kết nối MQTT xuống toàn bộ trình duyệt qua Socket.io
+  io.emit('telemetry_data', { workers, readings: helmetReadings, alerts });
+  io.emit('mqtt_device_status', { connected: true });
+}
+
+// ==========================================
+// API NHẬN DỮ LIỆU TỪ ESP32 (HTTP POST)
+// ==========================================
+app.post('/api/helmet-ping', (req, res) => {
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ error: "Thiếu trường 'id' của mũ!" });
+  }
+
+  processHelmetData(req.body);
+
+  const inZone = isPointInCircle([req.body.lat, req.body.lon], siteSettings.center, siteSettings.radius);
   return res.status(200).json({
     status: "success",
     message: "Đã ghi nhận dữ liệu mũ bảo hiểm",
@@ -114,25 +134,17 @@ app.get('/api/dashboard-state', (req, res) => {
     workers,
     readings: helmetReadings,
     alerts,
-    geofence: siteSettings // Trả về thông tin hình tròn để đồng bộ
+    geofence: siteSettings
   });
 });
 
-// Chạy server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`[SafeHat Server] Đang lắng nghe tại cổng ${PORT}`);
-});
-
-const mqtt = require('mqtt');
-
-// Kết nối đến Mosquitto MQTT Broker công cộng
+// ==========================================
+// CẤU HÌNH MQTT CLIENT
+// ==========================================
 const mqttClient = mqtt.connect('mqtt://test.mosquitto.org:1883');
 
 mqttClient.on('connect', () => {
     console.log('[MQTT] Đã kết nối thành công với test.mosquitto.org!');
-    // Subscribe đúng topic mà bạn của bạn đang cho ESP32 publish lên
-    // (Bạn nhớ hỏi lại bạn mình xem đang dùng chính xác topic gì, ví dụ: "safehat/device/telemetry")
     mqttClient.subscribe('safehat/device/telemetry', (err) => {
         if (!err) {
             console.log('[MQTT] Đã subscribe topic: safehat/device/telemetry');
@@ -140,71 +152,24 @@ mqttClient.on('connect', () => {
     });
 });
 
-// Khi có tin nhắn từ ESP32 gửi lên broker
+// Khi có tin nhắn từ ESP32 gửi lên broker qua MQTT
 mqttClient.on('message', async (topic, message) => {
     try {
         const payload = JSON.parse(message.toString());
         console.log('[MQTT Received]:', payload);
-
-        // payload từ ESP32 gửi lên thường có dạng:
-        // { id: "001", name: "Nguyễn Văn An", trade: "Thợ cốt pha", worn: true, battery: 90, lat: 10.7738, lon: 106.6585, fallen: false }
-
-        // Tự động gọi nội bộ logic xử lý như API /api/helmet-ping
-        // Hoặc bạn có thể giả lập request gửi vào hệ thống:
         processHelmetData(payload);
     } catch (e) {
         console.error('[MQTT Error] Không parse được JSON:', e);
     }
 });
 
-// Hàm xử lý dữ liệu chung cho cả API lẫn MQTT
-function processHelmetData(data) {
-    const { id, name, trade, worn, battery, lat, lon, fallen } = data;
-    if (!id) return;
+// Lắng nghe kết nối Socket.io từ trình duyệt
+io.on('connection', (socket) => {
+  console.log('[Socket.io] Có trình duyệt vừa kết nối giao diện.');
+});
 
-    let worker = workers.find(w => w.id === id);
-    if (!worker) {
-        workers.push({
-            id: id,
-            name: name || `Công nhân ID ${id}`,
-            trade: trade || "Thợ chính"
-        });
-    }
-
-    const inZone = isPointInCircle([lat, lon], siteSettings.center, siteSettings.radius);
-
-    helmetReadings[id] = {
-        worker_id: id,
-        worn: Boolean(worn),
-        battery: Number(battery) || 100,
-        lat: Number(lat) || 0.0,
-        lon: Number(lon) || 0.0,
-        fallen: Boolean(fallen),
-        updated_at: new Date().toISOString()
-    };
-
-    if (fallen === true) {
-        alerts.unshift({
-            id: 'alt_' + Date.now(),
-            worker_id: id,
-            type: 'TÉ_NGÃ',
-            lat,
-            lon,
-            timestamp: new Date().toISOString(),
-            resolved: false
-        });
-    } else if (worn === false && inZone) {
-        const alreadyAlerted = alerts.some(a => a.worker_id === id && a.type === 'THÁO_MŨ' && !a.resolved);
-        if (!alreadyAlerted) {
-            alerts.unshift({
-                id: 'alt_' + Date.now(),
-                worker_id: id,
-                type: 'THÁO_MŨ',
-                lat,
-                lon,
-                timestamp: new Date().toISOString(),
-                resolved: false
-            });
-        }
-    }
-}
+// Chạy server bằng http server thay vì app.listen thông thường
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`[SafeHat Server] Đang lắng nghe tại cổng ${PORT}`);
+});
