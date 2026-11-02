@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Nhập thư viện Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
     <style>.dark { color-scheme: dark; }</style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col justify-between">
@@ -21,8 +23,12 @@
             </div>
 
             <div class="flex items-center space-x-4">
+                <!-- Thanh hiển thị trạng thái MQTT động -->
                 <div class="hidden lg:flex items-center space-x-3 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
-                    <span class="flex items-center text-emerald-400 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5"></span>MQTT Connected</span>
+                    <span class="flex items-center text-red-400 font-semibold" id="mqtt-status-container">
+                        <span id="mqtt-status-dot" class="w-2 h-2 rounded-full bg-red-500 mr-1.5"></span>
+                        <span id="mqtt-status-text">MQTT Disconnected</span>
+                    </span>
                     <span class="text-slate-600">|</span>
                     <span id="realtime-clock" class="text-slate-300 font-mono">00:00:00</span>
                 </div>
@@ -43,6 +49,34 @@
     </footer>
 
     <script>
+        // Cấu hình Socket.io kết nối Server
+        const socket = typeof io !== 'undefined' ? io() : null;
+        let disconnectTimer = null;
+
+        if (socket) {
+            // Lắng nghe tín hiệu trạng thái mạch phần cứng từ server
+            socket.on('mqtt_device_status', (status) => {
+                const dot = document.getElementById('mqtt-status-dot');
+                const text = document.getElementById('mqtt-status-text');
+                const container = document.getElementById('mqtt-status-container');
+
+                if (status && status.connected && dot && text) {
+                    // Chuyển sang hiển thị XANH khi mạch hoạt động
+                    dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5";
+                    text.innerText = "MQTT Connected";
+                    if (container) container.className = "flex items-center text-emerald-400 font-semibold";
+
+                    // Đặt lại thời gian chờ 10 giây. Quá 10s không có dữ liệu mới -> Chuyển về ĐỎ (Disconnected)
+                    clearTimeout(disconnectTimer);
+                    disconnectTimer = setTimeout(() => {
+                        dot.className = "w-2 h-2 rounded-full bg-red-500 mr-1.5";
+                        text.innerText = "MQTT Disconnected";
+                        if (container) container.className = "flex items-center text-red-400 font-semibold";
+                    }, 10000);
+                }
+            });
+        }
+
         setInterval(() => {
             const now = new Date();
             const clockEl = document.getElementById('realtime-clock');
