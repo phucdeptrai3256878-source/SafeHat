@@ -139,15 +139,16 @@ app.get('/api/dashboard-state', (req, res) => {
 });
 
 // ==========================================
-// CẤU HÌNH MQTT CLIENT
+// CẤU HÌNH MQTT CLIENT (Cách B: Local Broker)
 // ==========================================
 const mqttClient = mqtt.connect('mqtt://test.mosquitto.org:1883');
 
 mqttClient.on('connect', () => {
-    console.log('[MQTT] Đã kết nối thành công với test.mosquitto.org!');
-    mqttClient.subscribe('safehat/device/telemetry', (err) => {
+    console.log('[MQTT] Đã kết nối thành công với Local MQTT Broker!');
+    // Subscribe khớp hoàn toàn với topic thiết bị gửi lên
+    mqttClient.subscribe('factory/helmets/HELMET_01', (err) => {
         if (!err) {
-            console.log('[MQTT] Đã subscribe topic: safehat/device/telemetry');
+            console.log('[MQTT] Đã subscribe topic: factory/helmets/HELMET_01');
         }
     });
 });
